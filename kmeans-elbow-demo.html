@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>KMeans Elbow Method Demo</title>
+  <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+  <style>
+    body { font-family: sans-serif; margin: 20px; }
+    #plots { display: flex; gap: 40px; }
+    #controls { margin-bottom: 20px; }
+    .plot-container { width: 400px; }
+    button { margin-right: 10px; }
+  </style>
+</head>
+<body>
+  <h2>KMeans Clustering & Elbow Method Demo</h2>
+  <div id="controls">
+    <button id="updateBtn">Update Clusters</button>
+    <button id="resetBtn">Reset</button>
+  </div>
+  <div id="plots">
+    <div class="plot-container">
+      <h4>Points & Clusters</h4>
+      <div id="scatter"></div>
+    </div>
+    <div class="plot-container">
+      <h4>Elbow Method (Inertia vs k)</h4>
+      <div id="elbow"></div>
+    </div>
+  </div>
+  <script>
+    // --- Parameters ---
+    const N_POINTS = 80;
+    const K_MIN = 1;
+    const K_MAX = 8;
+    let points = [];
+    let elbowData = [];
+    let clusterAssignments = {};
+    let currentK = 3;
+
+    // --- Utility Functions ---
+    function randomPoints(n) {
+      return Array.from({length: n}, () => [Math.random()*10, Math.random()*10]);
+    }
+
+    function euclidean(a, b) {
+      return Math.sqrt((a[0]-b[0])**2 + (a[1]-b[1])**2);
+    }
+
+    // --- KMeans Implementation ---
+    function kmeans(X, k, maxIter=100) {
+      // Randomly initialize centroids
+      let centroids = X.slice(0);
+      centroids = centroids.sort(() => Math.random()-0.5).slice(0, k);
+      let labels = new Array(X.length).fill(0);
+      for (let iter=0; iter<maxIter; iter++) {
+        // Assign labels
+        for (let i=0; i<X.length; i++) {
+          let dists = centroids.map(c => euclidean(X[i], c));
+          labels[i] = dists.indexOf(Math.min(...dists));
+        }
+        // Update centroids
+        let newCentroids = Array.from({length: k}, () => [0,0]);
+        let counts = Array(k).fill(0);
+        for (let i=0; i<X.length; i++) {
+          newCentroids[labels[i]][0] += X[i][0];
+          newCentroids[labels[i]][1] += X[i][1];
+          counts[labels[i]]++;
+        }
+        for (let j=0; j<k; j++) {
+          if (counts[j] > 0) {
+            newCentroids[j][0] /= counts[j];
+            newCentroids[j][1] /= counts[j];
+          } else {
+            // Reinitialize empty cluster
+            newCentroids[j] = X[Math.floor(Math.random()*X.length)];
+          }
+        }
+        // Check for convergence
+        if (JSON.stringify(centroids) === JSON.stringify(newCentroids)) break;
+        centroids = newCentroids;
+      }
+      // Compute inertia
+      let inertia = 0;
+      for (let i=0; i<X.length; i++) {
+        inertia += euclidean(X[i], centroids[labels[i]])**2;
+      }
+      return {labels, centroids, inertia};
+    }
+
+    // --- Plotting Functions ---
+    function plotScatter(k) {
+      let {labels, centroids} = clusterAssignments[k];
+      let colors = ["red", "blue", "green", "orange", "purple", "brown", "cyan", "magenta"];
+      let data = [];
+      for (let i=0; i<k; i++) {
+        let clusterPoints = points.filter((_, idx) => labels[idx] === i);
+        data.push({
+          x: clusterPoints.map(p => p[0]),
+          y: clusterPoints.map(p => p[1]),
+          mode: 'markers',
+          type: 'scatter',
+          name: `Cluster ${i+1}`,
+          marker: { color: colors[i%colors.length], size: 10 }
+        });
+        // Centroid
+        data.push({
+          x: [centroids[i][0]],
+          y: [centroids[i][1]],
+          mode: 'markers',
+          type: 'scatter',
+          name: `Centroid ${i+1}`,
+          marker: { color: colors[i%colors.length], size: 18, symbol: 'x' },
+          showlegend: false
+        });
+      }
+      Plotly.newPlot('scatter', data, {
+        margin: {t: 20},
+        xaxis: {range: [0, 10]},
+        yaxis: {range: [0, 10]},
+        legend: {orientation: 'h'}
+      }, {displayModeBar: false});
+    }
+
+    function plotElbow() {
+      let trace = {
+        x: elbowData.map(d => d.k),
+        y: elbowData.map(d => d.inertia),
+        mode: 'lines+markers',
+        marker: {size: 10},
+        line: {shape: 'linear'},
+        type: 'scatter',
+        text: elbowData.map(d => `k=${d.k}`),
+        hoverinfo: 'text+y'
+      };
+      let highlight = elbowData.findIndex(d => d.k === currentK);
+      let highlightTrace = {
+        x: [elbowData[highlight].k],
+        y: [elbowData[highlight].inertia],
+        mode: 'markers',
+        marker: {size: 18, color: 'orange', symbol: 'star'},
+        type: 'scatter',
+        showlegend: false
+      };
+      Plotly.newPlot('elbow', [trace, highlightTrace], {
+        margin: {t: 20},
+        xaxis: {title: 'k', dtick: 1},
+        yaxis: {title: 'Inertia'},
+      }, {displayModeBar: false});
+      // Add click event
+      let elbowDiv = document.getElementById('elbow');
+      elbowDiv.on('plotly_click', function(data){
+        let kClicked = data.points[0].x;
+        if (kClicked !== currentK) {
+          currentK = kClicked;
+          plotScatter(currentK);
+          plotElbow();
+        }
+      });
+    }
+
+    // --- Main Logic ---
+    function computeAllClusters() {
+      clusterAssignments = {};
+      elbowData = [];
+      for (let k=K_MIN; k<=K_MAX; k++) {
+        let result = kmeans(points, k);
+        clusterAssignments[k] = result;
+        elbowData.push({k, inertia: result.inertia});
+      }
+    }
+
+    function updateAll() {
+      points = randomPoints(N_POINTS);
+      computeAllClusters();
+      currentK = 3;
+      plotScatter(currentK);
+      plotElbow();
+    }
+
+    document.getElementById('updateBtn').onclick = updateAll;
+    document.getElementById('resetBtn').onclick = function() {
+      updateAll();
+    };
+
+    // --- Initial Run ---
+    updateAll();
+  </script>
+</body>
+</html>
